@@ -1,30 +1,39 @@
-# CI/CD Tools and Practices Final Project - JavaScript/Node.js Version
+# CI/CD Tools and Practices Final Project
 
-This repository contains a Node.js/Express.js version of the counter service for the Final Project of the Coursera course **CI/CD Tools and Practices**.
+This project builds a continuous integration and continuous delivery pipeline for the Node.js Counter Service from IBM Skills Network.
 
-## Features
+GitHub Actions checks out the project, sets up Node.js 24, installs the locked dependencies, lints with ESLint, and runs the Jest unit tests. OpenShift Pipelines uses six tasks in order: cleanup, git-clone, eslint, jest, buildah, and deploy. The deployment serves HTTP on port 8000 and responds to a readiness check at `/health`.
 
-- RESTful API for managing counters
-- In-memory storage
-- Comprehensive error handling
-- Security middleware (Helmet, CORS)
-- Logging middleware
-- Full test coverage with Jest
-- Docker support
-- Health check endpoint
+## Run locally
 
-## API Endpoints
+```sh
+npm ci --no-audit --no-fund
+npm run lint
+npm test -- --ci --runInBand
+npm start
+```
 
-- `GET /` - Service information
-- `GET /health` - Health check
-- `GET /counters` - List all counters
-- `POST /counters/:name` - Create a new counter
-- `GET /counters/:name` - Read a specific counter
-- `PUT /counters/:name` - Increment a counter
-- `DELETE /counters/:name` - Delete a counter
+The service provides `GET /` and `GET /health`, and supports creating, reading, incrementing, listing, and deleting in-memory counters under `/counters`.
 
-## Setup
+## Run in the OpenShift lab
 
-1. **Install dependencies:**
-   ```bash
-   npm install
+Open the final project lab and use its authenticated terminal. The current OpenShift project must provide the `pipeline` service account, the `skills-network-learner` storage class, the internal image registry, and the operator-installed Buildah task.
+
+```sh
+git clone https://github.com/vedant412/ci-cd-final-project.git
+cd ci-cd-final-project
+oc project -q
+bash bin/run-openshift.sh
+```
+
+The script applies the claim and definitions and starts one PipelineRun. With its printed run name, check execution and capture the application output.
+
+```sh
+oc get pipelinerun
+oc describe pvc pipeline-pvc
+oc logs deployment/counter-service | tee oc-pipeline-application-logs
+```
+
+Save the claim Details page as `oc-pipelines-console-pvc-details.png`, the `cd-pipeline` task view as `oc-pipelines-oc-final.png`, and the successful PipelineRun task graph as `oc-pipelines-oc-green.png`. The application logs contain `SERVICERUNNING` and port `8000` when the service starts.
+
+Adapted from the [IBM Skills Network JavaScript starter](https://github.com/ibm-developer-skills-network/hdjqg-ci-cd-final-project-template). See [LICENSE](LICENSE).

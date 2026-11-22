@@ -1,0 +1,120 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: cleanup
+spec:
+  description: Clear the dedicated source workspace before cloning.
+  workspaces:
+    - name: source
+  steps:
+    - name: cleanup
+      image: docker.io/library/alpine:3.23
+      env:
+        - name: SOURCE_DIR
+          value: $(workspaces.source.path)
+      script: |
+        #!/bin/sh
+        set -eu
+        find "$SOURCE_DIR" -mindepth 1 -maxdepth 1 ! -name lost+found -exec rm -rf -- {} +
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: git-clone
+spec:
+  params:
+    - name: url
+      type: string
+    - name: revision
+      type: string
+  workspaces:
+    - name: source
+  steps:
+    - name: clone
+      image: docker.io/library/node:24-bookworm
+      workingDir: $(workspaces.source.path)
+      env:
+        - name: HOME
+          value: /tmp
+        - name: REPO_URL
+          value: $(params.url)
+        - name: REPO_REVISION
+          value: $(params.revision)
+      script: |
+        #!/bin/sh
+        set -eu
+        git config --global --add safe.directory "$PWD"
+        git init .
+        git fetch --depth=1 -- "$REPO_URL" "$REPO_REVISION"
+        git checkout --detach FETCH_HEAD
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: eslint
+spec:
+  workspaces:
+    - name: source
+  steps:
+    - name: lint-with-eslint
+      image: docker.io/library/node:24-bookworm
+      workingDir: $(workspaces.source.path)
+      env:
+        - name: npm_config_cache
+          value: /tmp/npm-cache
+      script: |
+        #!/bin/sh
+        set -eu
+        npm ci --no-audit --no-fund
+        npm run lint
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: jest
+spec:
+  description: Run the counter service unit tests with Jest.
+  workspaces:
+    - name: source
+  steps:
+    - name: run-unit-tests-with-jest
+      image: docker.io/library/node:24-bookworm
+      workingDir: $(workspaces.source.path)
+      env:
+        - name: CI
+          value: 'true'
+        - name: npm_config_cache
+          value: /tmp/npm-cache
+      script: |
+        #!/bin/sh
+        set -eu
+        npm ci --no-audit --no-fund
+        npm test -- --ci --runInBand
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: deploy
+spec:
+  params:
+    - name: image
+      type: string
+  workspaces:
+    - name: source
+      readOnly: true
+  steps:
+    - name: openshift-client
+      image: quay.io/openshift/origin-cli:4.19
+      workingDir: $(workspaces.source.path)
+      env:
+        - name: DEPLOY_IMAGE
+          value: $(params.image)
+        - name: HOME
+          value: /tmp
+      script: |
+        #!/bin/sh
+        set -eu
+        oc set image --local -f .tekton/deployment.yml           "counter-service=$DEPLOY_IMAGE" -o yaml > /tmp/counter-deployment.yml
+        oc apply -f /tmp/counter-deployment.yml
+        oc apply -f .tekton/service.yml
+        oc rollout status deployment/counter-service --timeout=180s
